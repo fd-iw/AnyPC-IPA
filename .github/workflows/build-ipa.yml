@@ -1,0 +1,68 @@
+name: Build IPA
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build (unsigned, arm64, iOS 15+)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AnyPC.xcodeproj \
+            -scheme AnyPC \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee xcodebuild.log | grep -E "error:|warning: .*deprecated|\*\* BUILD" || true
+          test -d build/Build/Products/Release-iphoneos/AnyPC.app || { grep -E "error:" xcodebuild.log | head -50; exit 1; }
+
+      - name: Package IPA
+        run: |
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/AnyPC.app Payload/
+          zip -qry AnyPC.ipa Payload
+          ls -lh AnyPC.ipa
+
+      - name: Verify IPA targets iPhone SE (1st gen) / iOS 15
+        run: |
+          APP=Payload/AnyPC.app
+          MIN=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist")
+          echo "MinimumOSVersion=$MIN"
+          [ "$MIN" = "15.0" ]
+          lipo -info "$APP/AnyPC"
+          lipo -info "$APP/AnyPC" | grep -q arm64
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          test -f "$APP/Assets.car"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnyPC-IPA
+          path: AnyPC.ipa
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AnyPC.ipa
