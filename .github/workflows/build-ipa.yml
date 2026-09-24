@@ -61,8 +61,14 @@ jobs:
           name: AnyPC-IPA
           path: AnyPC.ipa
 
+      # Every push to the default branch publishes a release, so the download page's
+      # releases/latest/download/AnyPC.ipa link always points at the newest build.
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref_name == github.event.repository.default_branch)
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: AnyPC for iPhone ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: AnyPC.ipa
